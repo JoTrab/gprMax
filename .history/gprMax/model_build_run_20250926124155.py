@@ -106,10 +106,6 @@ def run_model(args, currentmodelrun, modelend, numbermodelruns, inputfile, usern
     # Used for naming geometry and output files
     appendmodelnumber = '' if numbermodelruns == 1 and not args.task and not args.restart else str(currentmodelrun)
 
-    # Set snapshot interval and outputdir from command line args (default None)
-    snapshot_interval = getattr(args, 'snapshot_interval', None)
-    snapshot_outputdir = getattr(args, 'snapshot_outputdir', None)
-
     # Normal model reading/building process; bypassed if geometry information to be reused
     if 'G' not in globals():
 
@@ -164,25 +160,6 @@ def run_model(args, currentmodelrun, modelend, numbermodelruns, inputfile, usern
 
         # Process parameters for commands that can only occur once in the model
         process_singlecmds(singlecmds, G)
-
-        # Allow snapshot interval/outputdir to be set from input file (single-use commands)
-        # Look for #snapshot_interval and #snapshot_outputdir in singlecmds
-        if '#snapshot_interval' in singlecmds and singlecmds['#snapshot_interval']:
-            try:
-                G.snapshot_interval = int(singlecmds['#snapshot_interval'][0].split()[0])
-            except Exception:
-                pass
-        elif snapshot_interval is not None:
-            G.snapshot_interval = snapshot_interval
-        else:
-            G.snapshot_interval = None
-
-        if '#snapshot_outputdir' in singlecmds and singlecmds['#snapshot_outputdir']:
-            G.snapshot_outputdir = singlecmds['#snapshot_outputdir'][0].strip()
-        elif snapshot_outputdir is not None:
-            G.snapshot_outputdir = snapshot_outputdir
-        else:
-            G.snapshot_outputdir = None
 
         # Process parameters for commands that can occur multiple times in the model
         if G.messages: print()

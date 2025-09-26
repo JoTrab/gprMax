@@ -86,6 +86,8 @@ class Snapshot(object):
         self.basefilename = filename
         self.outputdir = outputdir
 
+    def store(self, G):
+        """Store (in memory) electric and magnetic field values for snapshot.
     def store_and_write(self, G, timestep=None, suffix=None):
         """Store field values and immediately write snapshot to disk, freeing memory after writing.
 
@@ -162,8 +164,6 @@ class Snapshot(object):
         del Exslice, Eyslice, Ezslice, Hxslice, Hyslice, Hzslice
         del Exsnap, Eysnap, Ezsnap, Hxsnap, Hysnap, Hzsnap, electric, magnetic
 
-    def store(self, G):
-        """Store (in memory) electric and magnetic field values for snapshot.
         Args:
             G (class): Grid class instance - holds essential parameters describing the model.
         """
