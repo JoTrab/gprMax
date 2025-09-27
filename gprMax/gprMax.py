@@ -66,6 +66,7 @@ def main():
     parser.add_argument('--opt-taguchi', action='store_true', default=False, help='flag to optimise parameters using the Taguchi optimisation method')
     parser.add_argument('--snapshot-interval', type=int, default=None, help='Interval (in timesteps) to save snapshots incrementally to disk (set to 0 or omit for legacy behavior)')
     parser.add_argument('--snapshot-outputdir', type=str, default=None, help='Directory to save incremental snapshots (optional, default: inputfile_snaps)')
+    parser.add_argument('--snapshot-exclude-fields', nargs='*', default=None, help='List of field components to exclude from snapshots (e.g. Hx Hy Hz)')
     args = parser.parse_args()
 
     run_main(args)

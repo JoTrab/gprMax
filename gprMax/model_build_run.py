@@ -69,8 +69,7 @@ from gprMax.snapshots import Snapshot
 from gprMax.snapshots import gpu_initialise_snapshot_array
 from gprMax.snapshots import gpu_get_snapshot_array
 from gprMax.snapshots_gpu import kernel_template_store_snapshot
-from gprMax.snapshots import buffer_snapshots
-from gprMax.snapshots import save_snapshot_batch
+
 from gprMax.sources import gpu_initialise_src_arrays
 from gprMax.source_updates_gpu import kernels_template_sources
 from gprMax.utilities import get_host_info
@@ -111,6 +110,7 @@ def run_model(args, currentmodelrun, modelend, numbermodelruns, inputfile, usern
     # Set snapshot interval and outputdir from command line args (default None)
     snapshot_interval = getattr(args, 'snapshot_interval', None)
     snapshot_outputdir = getattr(args, 'snapshot_outputdir', None)
+    snapshot_exclude_fields = getattr(args, 'snapshot_exclude_fields', None)
 
     # Normal model reading/building process; bypassed if geometry information to be reused
     if 'G' not in globals():
@@ -167,8 +167,8 @@ def run_model(args, currentmodelrun, modelend, numbermodelruns, inputfile, usern
         # Process parameters for commands that can only occur once in the model
         process_singlecmds(singlecmds, G)
 
-        # Allow snapshot interval/outputdir to be set from input file (single-use commands)
-        # Look for #snapshot_interval and #snapshot_outputdir in singlecmds
+        # Allow snapshot interval/outputdir/exclude_fields to be set from input file (single-use commands)
+        # Look for #snapshot_interval, #snapshot_outputdir, #snapshot_exclude_fields in singlecmds
         if '#snapshot_interval' in singlecmds and singlecmds['#snapshot_interval']:
             try:
                 G.snapshot_interval = int(singlecmds['#snapshot_interval'][0].split()[0])
@@ -186,135 +186,147 @@ def run_model(args, currentmodelrun, modelend, numbermodelruns, inputfile, usern
         else:
             G.snapshot_outputdir = None
 
-        # Process parameters for commands that can occur multiple times in the model
-        if G.messages: print()
-        process_multicmds(multicmds, G)
-
-        # Estimate and check memory (RAM) usage
-        G.memory_estimate_basic()
-        G.memory_check()
-        if G.messages:
-            if G.gpu is None:
-                print('\nMemory (RAM) required: ~{}\n'.format(human_size(G.memoryusage)))
-            else:
-                print('\nMemory (RAM) required: ~{} host + ~{} GPU\n'.format(human_size(G.memoryusage), human_size(G.memoryusage)))
-
-        # Initialise an array for volumetric material IDs (solid), boolean
-        # arrays for specifying materials not to be averaged (rigid),
-        # an array for cell edge IDs (ID)
-        G.initialise_geometry_arrays()
-
-        # Initialise arrays for the field components
-        if G.gpu is None:
-            G.initialise_field_arrays()
-
-        # Process geometry commands in the order they were given
-        process_geometrycmds(geometry, G)
-
-        # Build the PMLs and calculate initial coefficients
-        if G.messages: print()
-        if all(value == 0 for value in G.pmlthickness.values()):
-            if G.messages:
-                print('PML: switched off')
-            pass  # If all the PMLs are switched off don't need to build anything
+        if '#snapshot_exclude_fields' in singlecmds and singlecmds['#snapshot_exclude_fields']:
+            exclude_fields = singlecmds['#snapshot_exclude_fields'][0].split()
+        elif snapshot_exclude_fields is not None:
+            exclude_fields = snapshot_exclude_fields
         else:
-            # Set default CFS parameters for PML if not given
-            if not G.cfs:
-                G.cfs = [CFS()]
-            if G.messages:
-                if all(value == G.pmlthickness['x0'] for value in G.pmlthickness.values()):
-                    pmlinfo = str(G.pmlthickness['x0'])
-                else:
-                    pmlinfo = ''
-                    for key, value in G.pmlthickness.items():
-                        pmlinfo += '{}: {}, '.format(key, value)
-                    pmlinfo = pmlinfo[:-2] + ' cells'
-                print('PML: formulation: {}, order: {}, thickness: {}'.format(G.pmlformulation, len(G.cfs), pmlinfo))
-            pbar = tqdm(total=sum(1 for value in G.pmlthickness.values() if value > 0), desc='Building PML boundaries', ncols=get_terminal_width() - 1, file=sys.stdout, disable=not G.progressbars)
-            build_pmls(G, pbar)
-            pbar.close()
+            exclude_fields = []
 
-        # Build the model, i.e. set the material properties (ID) for every edge
-        # of every Yee cell
-        if G.messages: print()
-        pbar = tqdm(total=2, desc='Building main grid', ncols=get_terminal_width() - 1, file=sys.stdout, disable=not G.progressbars)
-        build_electric_components(G.solid, G.rigidE, G.ID, G)
-        pbar.update()
-        build_magnetic_components(G.solid, G.rigidH, G.ID, G)
-        pbar.update()
+        # Build fields_to_store dict for snapshots
+        all_fields = ['Ex', 'Ey', 'Ez', 'Hx', 'Hy', 'Hz']
+        G.snapshot_fields_to_store = {f: f not in exclude_fields for f in all_fields}
+
+    # Process parameters for commands that can occur multiple times in the model
+    if G.messages: print()
+    # Pass fields_to_store to multicmds if needed
+    process_multicmds(multicmds, G)
+
+    # Estimate and check memory (RAM) usage
+    G.memory_estimate_basic()
+    G.memory_check()
+    if G.messages:
+        if G.gpu is None:
+            print('\nMemory (RAM) required: ~{}\n'.format(human_size(G.memoryusage)))
+        else:
+            print('\nMemory (RAM) required: ~{} host + ~{} GPU\n'.format(human_size(G.memoryusage), human_size(G.memoryusage)))
+
+    # Initialise an array for volumetric material IDs (solid), boolean
+    # arrays for specifying materials not to be averaged (rigid),
+    # an array for cell edge IDs (ID)
+    G.initialise_geometry_arrays()
+
+    # Initialise arrays for the field components
+    if G.gpu is None:
+        G.initialise_field_arrays()
+
+    # Process geometry commands in the order they were given
+    process_geometrycmds(geometry, G)
+
+    # Build the PMLs and calculate initial coefficients
+    if G.messages: print()
+    if all(value == 0 for value in G.pmlthickness.values()):
+        if G.messages:
+            print('PML: switched off')
+        pass  # If all the PMLs are switched off don't need to build anything
+    else:
+        # Set default CFS parameters for PML if not given
+        if not G.cfs:
+            G.cfs = [CFS()]
+        if G.messages:
+            if all(value == G.pmlthickness['x0'] for value in G.pmlthickness.values()):
+                pmlinfo = str(G.pmlthickness['x0'])
+            else:
+                pmlinfo = ''
+                for key, value in G.pmlthickness.items():
+                    pmlinfo += '{}: {}, '.format(key, value)
+                pmlinfo = pmlinfo[:-2] + ' cells'
+            print('PML: formulation: {}, order: {}, thickness: {}'.format(G.pmlformulation, len(G.cfs), pmlinfo))
+        pbar = tqdm(total=sum(1 for value in G.pmlthickness.values() if value > 0), desc='Building PML boundaries', ncols=get_terminal_width() - 1, file=sys.stdout, disable=not G.progressbars)
+        build_pmls(G, pbar)
         pbar.close()
 
-        # Add PEC boundaries to invariant direction in 2D modes
-        # N.B. 2D modes are a single cell slice of 3D grid
-        if '2D TMx' in G.mode:
-            # Ey & Ez components
-            G.ID[1, 0, :, :] = 0
-            G.ID[1, 1, :, :] = 0
-            G.ID[2, 0, :, :] = 0
-            G.ID[2, 1, :, :] = 0
-        elif '2D TMy' in G.mode:
-            # Ex & Ez components
-            G.ID[0, :, 0, :] = 0
-            G.ID[0, :, 1, :] = 0
-            G.ID[2, :, 0, :] = 0
-            G.ID[2, :, 1, :] = 0
-        elif '2D TMz' in G.mode:
-            # Ex & Ey components
-            G.ID[0, :, :, 0] = 0
-            G.ID[0, :, :, 1] = 0
-            G.ID[1, :, :, 0] = 0
-            G.ID[1, :, :, 1] = 0
+    # Build the model, i.e. set the material properties (ID) for every edge
+    # of every Yee cell
+    if G.messages: print()
+    pbar = tqdm(total=2, desc='Building main grid', ncols=get_terminal_width() - 1, file=sys.stdout, disable=not G.progressbars)
+    build_electric_components(G.solid, G.rigidE, G.ID, G)
+    pbar.update()
+    build_magnetic_components(G.solid, G.rigidH, G.ID, G)
+    pbar.update()
+    pbar.close()
 
-        # Process any voltage sources (that have resistance) to create a new
-        # material at the source location
-        for voltagesource in G.voltagesources:
-            voltagesource.create_material(G)
+    # Add PEC boundaries to invariant direction in 2D modes
+    # N.B. 2D modes are a single cell slice of 3D grid
+    if '2D TMx' in G.mode:
+        # Ey & Ez components
+        G.ID[1, 0, :, :] = 0
+        G.ID[1, 1, :, :] = 0
+        G.ID[2, 0, :, :] = 0
+        G.ID[2, 1, :, :] = 0
+    elif '2D TMy' in G.mode:
+        # Ex & Ez components
+        G.ID[0, :, 0, :] = 0
+        G.ID[0, :, 1, :] = 0
+        G.ID[2, :, 0, :] = 0
+        G.ID[2, :, 1, :] = 0
+    elif '2D TMz' in G.mode:
+        # Ex & Ey components
+        G.ID[0, :, :, 0] = 0
+        G.ID[0, :, :, 1] = 0
+        G.ID[1, :, :, 0] = 0
+        G.ID[1, :, :, 1] = 0
 
-        # Initialise arrays of update coefficients to pass to update functions
-        G.initialise_std_update_coeff_arrays()
+    # Process any voltage sources (that have resistance) to create a new
+    # material at the source location
+    for voltagesource in G.voltagesources:
+        voltagesource.create_material(G)
 
-        # Initialise arrays of update coefficients and temporary values if
-        # there are any dispersive materials
-        if Material.maxpoles != 0:
-            # Update estimated memory (RAM) usage
-            G.memoryusage += int(3 * Material.maxpoles * (G.nx + 1) * (G.ny + 1) * (G.nz + 1) * np.dtype(complextype).itemsize)
-            G.memory_check()
-            if G.messages:
-                print('\nMemory (RAM) required - updated (dispersive): ~{}\n'.format(human_size(G.memoryusage)))
+    # Initialise arrays of update coefficients to pass to update functions
+    G.initialise_std_update_coeff_arrays()
 
-            G.initialise_dispersive_arrays()
-
-        # Check there is sufficient memory to store any snapshots
-        if G.snapshots:
-            snapsmemsize = 0
-            for snap in G.snapshots:
-                # 2 x required to account for electric and magnetic fields
-                snapsmemsize += (2 * snap.datasizefield)
-            G.memoryusage += int(snapsmemsize)
-            G.memory_check(snapsmemsize=int(snapsmemsize))
-            if G.messages:
-                print('\nMemory (RAM) required - updated (snapshots): ~{}\n'.format(human_size(G.memoryusage)))
-
-        # Process complete list of materials - calculate update coefficients,
-        # store in arrays, and build text list of materials/properties
-        materialsdata = process_materials(G)
+    # Initialise arrays of update coefficients and temporary values if
+    # there are any dispersive materials
+    if Material.maxpoles != 0:
+        # Update estimated memory (RAM) usage
+        G.memoryusage += int(3 * Material.maxpoles * (G.nx + 1) * (G.ny + 1) * (G.nz + 1) * np.dtype(complextype).itemsize)
+        G.memory_check()
         if G.messages:
-            print('\nMaterials:')
-            materialstable = AsciiTable(materialsdata)
-            materialstable.outer_border = False
-            materialstable.justify_columns[0] = 'right'
-            print(materialstable.table)
+            print('\nMemory (RAM) required - updated (dispersive): ~{}\n'.format(human_size(G.memoryusage)))
 
-        # Check to see if numerical dispersion might be a problem
-        results = dispersion_analysis(G)
-        if results['error'] and G.messages:
-            print(Fore.RED + "\nWARNING: Numerical dispersion analysis not carried out as {}".format(results['error']) + Style.RESET_ALL)
-        elif results['N'] < G.mingridsampling:
-            raise GeneralError("Non-physical wave propagation: Material '{}' has wavelength sampled by {} cells, less than required minimum for physical wave propagation. Maximum significant frequency estimated as {:g}Hz".format(results['material'].ID, results['N'], results['maxfreq']))
-        elif results['deltavp'] and np.abs(results['deltavp']) > G.maxnumericaldisp and G.messages:
-            print(Fore.RED + "\nWARNING: Potentially significant numerical dispersion. Estimated largest physical phase-velocity error is {:.2f}% in material '{}' whose wavelength sampled by {} cells. Maximum significant frequency estimated as {:g}Hz".format(results['deltavp'], results['material'].ID, results['N'], results['maxfreq']) + Style.RESET_ALL)
-        elif results['deltavp'] and G.messages:
-            print("\nNumerical dispersion analysis: estimated largest physical phase-velocity error is {:.2f}% in material '{}' whose wavelength sampled by {} cells. Maximum significant frequency estimated as {:g}Hz".format(results['deltavp'], results['material'].ID, results['N'], results['maxfreq']))
+        G.initialise_dispersive_arrays()
+
+    # Check there is sufficient memory to store any snapshots
+    if G.snapshots:
+        snapsmemsize = 0
+        for snap in G.snapshots:
+            # 2 x required to account for electric and magnetic fields
+            snapsmemsize += (2 * snap.datasizefield)
+        G.memoryusage += int(snapsmemsize)
+        G.memory_check(snapsmemsize=int(snapsmemsize))
+        if G.messages:
+            print('\nMemory (RAM) required - updated (snapshots): ~{}\n'.format(human_size(G.memoryusage)))
+
+    # Process complete list of materials - calculate update coefficients,
+    # store in arrays, and build text list of materials/properties
+    materialsdata = process_materials(G)
+    if G.messages:
+        print('\nMaterials:')
+        materialstable = AsciiTable(materialsdata)
+        materialstable.outer_border = False
+        materialstable.justify_columns[0] = 'right'
+        print(materialstable.table)
+
+    # Check to see if numerical dispersion might be a problem
+    results = dispersion_analysis(G)
+    if results['error'] and G.messages:
+        print(Fore.RED + "\nWARNING: Numerical dispersion analysis not carried out as {}".format(results['error']) + Style.RESET_ALL)
+    elif results['N'] < G.mingridsampling:
+        raise GeneralError("Non-physical wave propagation: Material '{}' has wavelength sampled by {} cells, less than required minimum for physical wave propagation. Maximum significant frequency estimated as {:g}Hz".format(results['material'].ID, results['N'], results['maxfreq']))
+    elif results['deltavp'] and np.abs(results['deltavp']) > G.maxnumericaldisp and G.messages:
+        print(Fore.RED + "\nWARNING: Potentially significant numerical dispersion. Estimated largest physical phase-velocity error is {:.2f}% in material '{}' whose wavelength sampled by {} cells. Maximum significant frequency estimated as {:g}Hz".format(results['deltavp'], results['material'].ID, results['N'], results['maxfreq']) + Style.RESET_ALL)
+    elif results['deltavp'] and G.messages:
+        print("\nNumerical dispersion analysis: estimated largest physical phase-velocity error is {:.2f}% in material '{}' whose wavelength sampled by {} cells. Maximum significant frequency estimated as {:g}Hz".format(results['deltavp'], results['material'].ID, results['N'], results['maxfreq']))
 
     # If geometry information to be reused between model runs
     else:
@@ -465,10 +477,10 @@ def solve_cpu(currentmodelrun, modelend, G,appendmodelnumber=None):
         # Original logic: store snapshot only at defined times
 
         for ii, snap in enumerate(G.snapshots):
-            # print( G.snapshots)
-            #print(snap.time) 
             if snap.time == iteration + 1:
-                # snap.store_for_interval(G)
+                # Pass fields_to_store from G if available
+                if hasattr(G, 'snapshot_fields_to_store'):
+                    snap.fields_to_store = G.snapshot_fields_to_store
                 snap.store(G)
                 
         # At defined snapshot intervals, write VTKs and clear memory

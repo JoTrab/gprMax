@@ -54,7 +54,7 @@ class Snapshot(object):
         floatname = 'Float64'
         floatstring = 'd'
 
-    def __init__(self, xs=None, ys=None, zs=None, xf=None, yf=None, zf=None, dx=None, dy=None, dz=None, time=None, filename=None, outputdir=None):
+    def __init__(self, xs=None, ys=None, zs=None, xf=None, yf=None, zf=None, dx=None, dy=None, dz=None, time=None, filename=None, outputdir=None, suffix=None, fields_to_store=None):
         """
         Args:
             xs, xf, ys, yf, zs, zf (int): Extent of the volume in cells.
@@ -62,6 +62,7 @@ class Snapshot(object):
             time (int): Iteration number to take the snapshot on.
             filename (str): Filename to save to.
             outputdir (str): Directory to save snapshots incrementally (optional).
+            fields_to_store (dict): Dict specifying which field components to store, e.g. {'Ex': True, 'Ey': True, 'Ez': True, 'Hx': True, 'Hy': False, 'Hz': True}
         """
 
         self.xs = xs
@@ -85,82 +86,28 @@ class Snapshot(object):
         self.time = time
         self.basefilename = filename
         self.outputdir = outputdir
-
-    def store_and_write(self, G, timestep=None, suffix=None):
-        """Store field values and immediately write snapshot to disk, freeing memory after writing.
-
-        Args:
-            G (class): Grid class instance.
-            timestep (int, optional): Current timestep, used for filename suffix.
-            suffix (str, optional): Additional string to append to filename.
-        """
-        # Store field values as in store()
-        Exslice = np.ascontiguousarray(G.Ex[self.sx, self.sy, self.sz])
-        Eyslice = np.ascontiguousarray(G.Ey[self.sx, self.sy, self.sz])
-        Ezslice = np.ascontiguousarray(G.Ez[self.sx, self.sy, self.sz])
-        Hxslice = np.ascontiguousarray(G.Hx[self.sx, self.sy, self.sz])
-        Hyslice = np.ascontiguousarray(G.Hy[self.sx, self.sy, self.sz])
-        Hzslice = np.ascontiguousarray(G.Hz[self.sx, self.sy, self.sz])
-
-        Exsnap = np.zeros((self.nx, self.ny, self.nz), dtype=floattype)
-        Eysnap = np.zeros((self.nx, self.ny, self.nz), dtype=floattype)
-        Ezsnap = np.zeros((self.nx, self.ny, self.nz), dtype=floattype)
-        Hxsnap = np.zeros((self.nx, self.ny, self.nz), dtype=floattype)
-        Hysnap = np.zeros((self.nx, self.ny, self.nz), dtype=floattype)
-        Hzsnap = np.zeros((self.nx, self.ny, self.nz), dtype=floattype)
-
-        calculate_snapshot_fields(
-            self.nx,
-            self.ny,
-            self.nz,
-            Exslice,
-            Eyslice,
-            Ezslice,
-            Hxslice,
-            Hyslice,
-            Hzslice,
-            Exsnap,
-            Eysnap,
-            Ezsnap,
-            Hxsnap,
-            Hysnap,
-            Hzsnap)
-
-        electric = np.stack((Exsnap, Eysnap, Ezsnap)).reshape(-1, order='F')
-        magnetic = np.stack((Hxsnap, Hysnap, Hzsnap)).reshape(-1, order='F')
-
-        # Determine output filename
+        # Store which field components to save (default: all True)
+        self.fields_to_store = fields_to_store or {
+            'Ex': True, 'Ey': True, 'Ez': True,
+            'Hx': True, 'Hy': True, 'Hz': True
+        }
+                # Determine output filename
         if self.outputdir is not None:
             if not os.path.exists(self.outputdir):
                 os.makedirs(self.outputdir)
             base = self.basefilename or "snapshot"
-            if timestep is not None:
-                base += f"_t{timestep:06d}"
+            if time is not None:
+                base += f"_t{time:06d}"
             if suffix:
                 base += f"_{suffix}"
-            filename = os.path.join(self.outputdir, base + ".vti")
+            self.filename = os.path.join(self.outputdir, base + ".vti")
         else:
-            filename = self.filename
-
-        # Write to disk using VTK format
-        hfield_offset = 3 * np.dtype(floattype).itemsize * self.ncells + np.dtype(np.uint32).itemsize
-        with open(filename, 'wb') as f:
-            f.write('<?xml version="1.0"?>\n'.encode('utf-8'))
-            f.write('<VTKFile type="ImageData" version="1.0" byte_order="{}">\n'.format(Snapshot.byteorder).encode('utf-8'))
-            f.write('<ImageData WholeExtent="{} {} {} {} {} {}" Origin="0 0 0" Spacing="{:.3} {:.3} {:.3}">\n'.format(self.xs, round_value(self.xf / self.dx), self.ys, round_value(self.yf / self.dy), self.zs, round_value(self.zf / self.dz), self.dx * G.dx, self.dy * G.dy, self.dz * G.dz).encode('utf-8'))
-            f.write('<Piece Extent="{} {} {} {} {} {}">\n'.format(self.xs, round_value(self.xf / self.dx), self.ys, round_value(self.yf / self.dy), self.zs, round_value(self.zf / self.dz)).encode('utf-8'))
-            f.write('<CellData Vectors="E-field H-field">\n'.encode('utf-8'))
-            f.write('<DataArray type="{}" Name="E-field" NumberOfComponents="3" format="appended" offset="0" />\n'.format(Snapshot.floatname).encode('utf-8'))
-            f.write('<DataArray type="{}" Name="H-field" NumberOfComponents="3" format="appended" offset="{}" />\n'.format(Snapshot.floatname, hfield_offset).encode('utf-8'))
-            f.write('</CellData>\n</Piece>\n</ImageData>\n<AppendedData encoding="raw">\n_'.encode('utf-8'))
-            f.write(pack('I', self.datasizefield))
-            electric.tofile(f)
-            f.write(pack('I', self.datasizefield))
-            magnetic.tofile(f)
-            f.write('\n</AppendedData>\n</VTKFile>'.encode('utf-8'))
-        # Free memory (let local variables go out of scope)
-        del Exslice, Eyslice, Ezslice, Hxslice, Hyslice, Hzslice
-        del Exsnap, Eysnap, Ezsnap, Hxsnap, Hysnap, Hzsnap, electric, magnetic
+            base = self.basefilename or "snapshot"
+            if time is not None:
+                base += f"_t{time:06d}"
+            if suffix:
+                base += f"_{suffix}"
+            self.filename = base + ".vti"
 
     def store(self, G):
         """Store (in memory) electric and magnetic field values for snapshot.
@@ -168,7 +115,7 @@ class Snapshot(object):
             G (class): Grid class instance - holds essential parameters describing the model.
         """
 
-        # Memory views of field arrays to dimensions required for the snapshot
+         # Memory views of field arrays to dimensions required for the snapshot
         Exslice = np.ascontiguousarray(G.Ex[self.sx, self.sy, self.sz])
         Eyslice = np.ascontiguousarray(G.Ey[self.sx, self.sy, self.sz])
         Ezslice = np.ascontiguousarray(G.Ez[self.sx, self.sy, self.sz])
@@ -202,21 +149,42 @@ class Snapshot(object):
             Hysnap,
             Hzsnap)
 
-        # Convert to format for Paraview
-        self.electric = np.stack((Exsnap, Eysnap, Ezsnap)).reshape(-1, order='F')
-        self.magnetic = np.stack((Hxsnap, Hysnap, Hzsnap)).reshape(-1, order='F')
+        # Convert to format for Paraview, only stack selected fields, shape (n_components, nx, ny, nz)
+
+        electric_fields = []
+        for field, snap in zip(['Ex', 'Ey', 'Ez'], [Exsnap, Eysnap, Ezsnap]):
+
+            if self.fields_to_store.get(field, True):
+                electric_fields.append(snap)
+        if electric_fields:
+            self.electric = np.stack(electric_fields).reshape(-1, order='F')
+        else:
+            self.electric = None
+
+        magnetic_fields = []
+        for field, snap in zip(['Hx', 'Hy', 'Hz'], [Hxsnap, Hysnap, Hzsnap]):
+            if self.fields_to_store.get(field, True):
+                magnetic_fields.append(snap)
+        if magnetic_fields:
+            self.magnetic = np.stack(magnetic_fields).reshape(-1, order='F')
+        else:
+            self.magnetic = None
 
     def write_vtk_imagedata(self, pbar, G):
-        """Write snapshot data to a VTK ImageData (.vti) file.
+        """Write snapshot data to a VTK ImageData (.vti) file, robust to excluded fields."""
+        # Determine number of components for E and H fields
+        n_electric = 0
+        n_magnetic = 0
+        if self.electric is not None:
+            # electric_fields is a stacked array, shape (n_components, ...)
+            n_electric = len([f for f in ['Ex', 'Ey', 'Ez'] if self.fields_to_store.get(f, True)])
+        if self.magnetic is not None:
+            n_magnetic = len([f for f in ['Hx', 'Hy', 'Hz'] if self.fields_to_store.get(f, True)])
 
-            N.B. No Python 3 support for VTK at time of writing (03/2015)
-
-        Args:
-            pbar (class): Progress bar class instance.
-            G (class): Grid class instance - holds essential parameters describing the model.
-        """
-
-        hfield_offset = 3 * np.dtype(floattype).itemsize * self.ncells + np.dtype(np.uint32).itemsize
+        # Calculate offsets for appended data
+        electric_bytes = n_electric * np.dtype(floattype).itemsize * self.ncells
+        magnetic_bytes = n_magnetic * np.dtype(floattype).itemsize * self.ncells
+        hfield_offset = electric_bytes + np.dtype(np.uint32).itemsize
 
         self.filehandle = open(self.filename, 'wb')
         self.filehandle.write('<?xml version="1.0"?>\n'.encode('utf-8'))
@@ -224,24 +192,42 @@ class Snapshot(object):
         self.filehandle.write('<ImageData WholeExtent="{} {} {} {} {} {}" Origin="0 0 0" Spacing="{:.3} {:.3} {:.3}">\n'.format(self.xs, round_value(self.xf / self.dx), self.ys, round_value(self.yf / self.dy), self.zs, round_value(self.zf / self.dz), self.dx * G.dx, self.dy * G.dy, self.dz * G.dz).encode('utf-8'))
         self.filehandle.write('<Piece Extent="{} {} {} {} {} {}">\n'.format(self.xs, round_value(self.xf / self.dx), self.ys, round_value(self.yf / self.dy), self.zs, round_value(self.zf / self.dz)).encode('utf-8'))
         self.filehandle.write('<CellData Vectors="E-field H-field">\n'.encode('utf-8'))
-        self.filehandle.write('<DataArray type="{}" Name="E-field" NumberOfComponents="3" format="appended" offset="0" />\n'.format(Snapshot.floatname).encode('utf-8'))
-        self.filehandle.write('<DataArray type="{}" Name="H-field" NumberOfComponents="3" format="appended" offset="{}" />\n'.format(Snapshot.floatname, hfield_offset).encode('utf-8'))
+        self.filehandle.write('<DataArray type="{}" Name="E-field" NumberOfComponents="{}" format="appended" offset="0" />\n'.format(Snapshot.floatname, n_electric).encode('utf-8'))
+        self.filehandle.write('<DataArray type="{}" Name="H-field" NumberOfComponents="{}" format="appended" offset="{}" />\n'.format(Snapshot.floatname, n_magnetic, hfield_offset).encode('utf-8'))
         self.filehandle.write('</CellData>\n</Piece>\n</ImageData>\n<AppendedData encoding="raw">\n_'.encode('utf-8'))
 
         # Write number of bytes of appended data as UInt32
-        self.filehandle.write(pack('I', self.datasizefield))
+        self.filehandle.write(pack('I', electric_bytes))
         pbar.update(n=4)
-        self.electric.tofile(self.filehandle)
-        pbar.update(n=self.datasizefield)
+        if self.electric is not None:
+            self.electric.tofile(self.filehandle)
+            pbar.update(n=electric_bytes)
+        else:
+            # Write zeros if no electric field
+            np.zeros(electric_bytes // np.dtype(floattype).itemsize, dtype=floattype).tofile(self.filehandle)
+            pbar.update(n=electric_bytes)
 
         # Write number of bytes of appended data as UInt32
-        self.filehandle.write(pack('I', self.datasizefield))
+        self.filehandle.write(pack('I', magnetic_bytes))
         pbar.update(n=4)
-        self.magnetic.tofile(self.filehandle)
-        pbar.update(n=self.datasizefield)
+        if self.magnetic is not None:
+            self.magnetic.tofile(self.filehandle)
+            pbar.update(n=magnetic_bytes)
+        else:
+            np.zeros(magnetic_bytes // np.dtype(floattype).itemsize, dtype=floattype).tofile(self.filehandle)
+            pbar.update(n=magnetic_bytes)
 
         self.filehandle.write('\n</AppendedData>\n</VTKFile>'.encode('utf-8'))
         self.filehandle.close()
+
+    def clear(self, G=None):
+        """Clear stored electric and magnetic field arrays to free memory."""
+        if hasattr(self, 'electric'):
+            del self.electric
+        if hasattr(self, 'magnetic'):
+            del self.magnetic
+        # Optionally clear other large arrays if needed
+        # ...existing code...
 
 
 def gpu_initialise_snapshot_array(G):
