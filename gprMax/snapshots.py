@@ -92,6 +92,7 @@ class Snapshot(object):
             'Hx': True, 'Hy': True, 'Hz': True
         }
                 # Determine output filename
+        print(self.outputdir)        
         if self.outputdir is not None:
             if not os.path.exists(self.outputdir):
                 os.makedirs(self.outputdir)

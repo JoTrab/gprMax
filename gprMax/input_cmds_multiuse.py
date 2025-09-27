@@ -538,7 +538,9 @@ def process_multicmds(multicmds, G):
             if time <= 0 or time > G.iterations:
                 raise CmdInputError("'" + cmdname + ': ' + ' '.join(tmp) + "'" + ' time value is not valid')
 
-            s = Snapshot(xs, ys, zs, xf, yf, zf, dx, dy, dz, time, tmp[10])
+            # Pass outputdir from G if available
+            outputdir = getattr(G, 'snapshot_outputdir', None)
+            s = Snapshot(xs, ys, zs, xf, yf, zf, dx, dy, dz, time, tmp[10], outputdir=outputdir)
 
             if G.messages:
                 print('Snapshot from {:g}m, {:g}m, {:g}m, to {:g}m, {:g}m, {:g}m, discretisation {:g}m, {:g}m, {:g}m, at {:g} secs with filename {} created.'.format(xs * G.dx, ys * G.dy, zs * G.dz, xf * G.dx, yf * G.dy, zf * G.dz, dx * G.dx, dy * G.dy, dz * G.dz, s.time * G.dt, s.basefilename))
