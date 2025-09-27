@@ -69,6 +69,8 @@ from gprMax.snapshots import Snapshot
 from gprMax.snapshots import gpu_initialise_snapshot_array
 from gprMax.snapshots import gpu_get_snapshot_array
 from gprMax.snapshots_gpu import kernel_template_store_snapshot
+from gprMax.snapshots import buffer_snapshots
+from gprMax.snapshots import save_snapshot_batch
 from gprMax.sources import gpu_initialise_src_arrays
 from gprMax.source_updates_gpu import kernels_template_sources
 from gprMax.utilities import get_host_info
@@ -391,15 +393,17 @@ def run_model(args, currentmodelrun, modelend, numbermodelruns, inputfile, usern
 
         # Main FDTD solving functions for either CPU or GPU
         if G.gpu is None:
-            tsolve = solve_cpu(currentmodelrun, modelend, G)
+            tsolve = solve_cpu(currentmodelrun, modelend, G,appendmodelnumber)
         else:
             tsolve, memsolve = solve_gpu(currentmodelrun, modelend, G)
 
         # Write an output file in HDF5 format
         write_hdf5_outputfile(outputfile, G)
 
-        # Write any snapshots to file
-        if G.snapshots:
+        # Write any snapshots to file (only if not using incremental/batch snapshot saving)
+        snapshot_interval = getattr(G, 'snapshot_interval', None)
+        incremental_snapshots = snapshot_interval is not None and snapshot_interval > 0
+        if G.snapshots and not incremental_snapshots:
             # Create directory and construct filename from user-supplied name and model run number
             snapshotdir = os.path.join(G.inputdirectory, os.path.splitext(G.inputfilename)[0] + '_snaps' + appendmodelnumber)
             if not os.path.exists(snapshotdir):
@@ -428,7 +432,7 @@ def run_model(args, currentmodelrun, modelend, numbermodelruns, inputfile, usern
     return tsolve
 
 
-def solve_cpu(currentmodelrun, modelend, G):
+def solve_cpu(currentmodelrun, modelend, G,appendmodelnumber=None):
     """
     Solving using FDTD method on CPU. Parallelised using Cython (OpenMP) for
     electric and magnetic field updates, and PML updates.
@@ -448,22 +452,45 @@ def solve_cpu(currentmodelrun, modelend, G):
     snapshot_interval = getattr(G, 'snapshot_interval', None)
     snapshot_outputdir = getattr(G, 'snapshot_outputdir', None)
     incremental_snapshots = snapshot_interval is not None and snapshot_interval > 0
+    if G.snapshot_interval is not None and G.snapshot_interval > 0:
+        # Create directory and construct filename from user-supplied name and model run number
+        snapshotdir = os.path.join(G.inputdirectory, os.path.splitext(G.inputfilename)[0] + '_snaps' + appendmodelnumber)
+        if not os.path.exists(snapshotdir):
+            os.mkdir(snapshotdir)
+
 
     for iteration in tqdm(range(G.iterations), desc='Running simulation, model ' + str(currentmodelrun) + '/' + str(modelend), ncols=get_terminal_width() - 1, file=sys.stdout, disable=not G.progressbars):
         # Store field component values for every receiver and transmission line
         store_outputs(iteration, G.Ex, G.Ey, G.Ez, G.Hx, G.Hy, G.Hz, G)
+        # Original logic: store snapshot only at defined times
 
-        # Store any snapshots
-        for snap in G.snapshots:
-            if incremental_snapshots:
-                # Save every snapshot_interval timesteps
-                if (iteration + 1) % snapshot_interval == 0:
-                    snap.outputdir = snapshot_outputdir
-                    snap.store_and_write(G, timestep=iteration+1)
-            else:
-                if snap.time == iteration + 1:
-                    snap.store(G)
-
+        for ii, snap in enumerate(G.snapshots):
+            # print( G.snapshots)
+            #print(snap.time) 
+            if snap.time == iteration + 1:
+                # snap.store_for_interval(G)
+                snap.store(G)
+                
+        # At defined snapshot intervals, write VTKs and clear memory
+        if G.snapshot_interval is not None and G.snapshot_interval > 0:
+            #print((iteration + 1) % G.snapshot_interval)
+            if (iteration + 1) % G.snapshot_interval == 0: 
+                multiplier_iterations = (iteration + 1) // G.snapshot_interval                  
+                field_to_remove = []
+                print(multiplier_iterations)
+                if G.messages: print()
+                for i, snap_inner in enumerate(G.snapshots[(multiplier_iterations-1)*G.snapshot_interval:multiplier_iterations*G.snapshot_interval]):
+                    pbar = tqdm(total=snap_inner.vtkdatawritesize, leave=True, unit='byte', unit_scale=True, desc='Writing snapshot file {} of {}, {}'.format(i + 1, len(G.snapshots), os.path.split(snap_inner.filename)[1]), ncols=get_terminal_width() - 1, file=sys.stdout, disable=not G.progressbars)
+                    # for attr, value in vars(snap_inner).items():
+                    #     print(f"{attr}: {value}")
+                    snap_inner.write_vtk_imagedata(pbar, G)
+                    pbar.close()
+                    field_to_remove.append(snap_inner)
+                if G.messages: print()
+                        
+                # Remove written snap_innershots from G.snap_innershots
+                for snap_inner in field_to_remove:
+                    snap_inner.clear()
         # Update magnetic field components
         update_magnetic(G.nx, G.ny, G.nz, G.nthreads, G.updatecoeffsH, G.ID, G.Ex, G.Ey, G.Ez, G.Hx, G.Hy, G.Hz)
 
