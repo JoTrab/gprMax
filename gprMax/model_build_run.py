@@ -298,14 +298,27 @@ def run_model(args, currentmodelrun, modelend, numbermodelruns, inputfile, usern
 
     # Check there is sufficient memory to store any snapshots
     if G.snapshots:
-        snapsmemsize = 0
-        for snap in G.snapshots:
-            # 2 x required to account for electric and magnetic fields
-            snapsmemsize += (2 * snap.datasizefield)
-        G.memoryusage += int(snapsmemsize)
-        G.memory_check(snapsmemsize=int(snapsmemsize))
+        if G.snapshot_interval is not None and G.snapshot_interval > 0 and G.snapshots:
+            snapOne = G.snapshots[0]
+            snapsmemsizeOne = (2 * snapOne.datasizefield)
+            SnapBatchSize = snapsmemsizeOne*G.snapshot_interval
+            print(human_size(SnapBatchSize))
+            AllSnapSize = snapsmemsizeOne*len(G.snapshots)  
+            G.memory_check(snapsmemsize=int(SnapBatchSize))
+        else:    
+            snapsmemsize = 0
+            for snap in G.snapshots:
+                # 2 x required to account for electric and magnetic fields
+                snapsmemsize += (2 * snap.datasizefield)
+            G.memoryusage += int(snapsmemsize)              
+            G.memory_check(snapsmemsize=int(snapsmemsize))
         if G.messages:
-            print('\nMemory (RAM) required - updated (snapshots): ~{}\n'.format(human_size(G.memoryusage)))
+            if G.snapshot_interval is not None and G.snapshot_interval > 0 and G.snapshots:     
+                print('\nMemory (RAM) required - updated (snapshots, per batch): ~{}\n'.format(human_size(SnapBatchSize)))     
+                print('\Disk space required - updated (snapshots, all batches): ~{}\n'.format(human_size(AllSnapSize)))                            
+            else:
+                print('\nMemory (RAM) required - updated (snapshots): ~{}\n'.format(human_size(G.memoryusage)))
+                
 
     # Process complete list of materials - calculate update coefficients,
     # store in arrays, and build text list of materials/properties
