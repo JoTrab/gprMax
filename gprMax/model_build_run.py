@@ -482,7 +482,9 @@ def solve_cpu(currentmodelrun, modelend, G,appendmodelnumber=None):
         if not os.path.exists(snapshotdir):
             os.mkdir(snapshotdir)
 
-
+    snapStore_iterator = 0
+    multiplier_iterations = 0
+    old_multiplier= 0
     for iteration in tqdm(range(G.iterations), desc='Running simulation, model ' + str(currentmodelrun) + '/' + str(modelend), ncols=get_terminal_width() - 1, file=sys.stdout, disable=not G.progressbars):
         # Store field component values for every receiver and transmission line
         store_outputs(iteration, G.Ex, G.Ey, G.Ez, G.Hx, G.Hy, G.Hz, G)
@@ -490,25 +492,57 @@ def solve_cpu(currentmodelrun, modelend, G,appendmodelnumber=None):
 
         for ii, snap in enumerate(G.snapshots):
             if snap.time == iteration + 1:
+                # for attr, value in snap.__dict__.items():
+                #     print(f"{attr}: {value}")
+                print(snap.time,iteration+1)
                 # Pass fields_to_store from G if available
                 if hasattr(G, 'snapshot_fields_to_store'):
                     snap.fields_to_store = G.snapshot_fields_to_store
                 snap.store(G)
-                
+                snapStore_iterator += 1
+                multiplier_iterations = (snapStore_iterator )  // G.snapshot_interval   
+
         # At defined snapshot intervals, write VTKs and clear memory
         if G.snapshot_interval is not None and G.snapshot_interval > 0:
             #print((iteration + 1) % G.snapshot_interval)
-            if (iteration + 1) % G.snapshot_interval == 0: 
-                multiplier_iterations = (iteration + 1) // G.snapshot_interval                  
+            if multiplier_iterations > 0 and (snapStore_iterator) % multiplier_iterations*G.snapshot_interval == 0 and multiplier_iterations > old_multiplier: 
+                old_multiplier = multiplier_iterations
                 field_to_remove = []
-                print(multiplier_iterations)
                 if G.messages: print()
                 for i, snap_inner in enumerate(G.snapshots[(multiplier_iterations-1)*G.snapshot_interval:multiplier_iterations*G.snapshot_interval]):
-                    pbar = tqdm(total=snap_inner.vtkdatawritesize, leave=True, unit='byte', unit_scale=True, desc='Writing snapshot file {} of {}, {}'.format(i + 1, len(G.snapshots), os.path.split(snap_inner.filename)[1]), ncols=get_terminal_width() - 1, file=sys.stdout, disable=not G.progressbars)
-                    # for attr, value in vars(snap_inner).items():
-                    #     print(f"{attr}: {value}")
-                    snap_inner.write_vtk_imagedata(pbar, G)
-                    pbar.close()
+                    print(old_multiplier,multiplier_iterations,len(G.snapshots),snap_inner.time  ,snapStore_iterator,multiplier_iterations)             
+                    import time
+                    max_wait = 15 * 60  # 15 minutes in seconds
+                    waited = 0
+                    required_fields = []
+                    if hasattr(G, 'snapshot_fields_to_store'):
+                        if G.snapshot_fields_to_store.get('Ex', False) or G.snapshot_fields_to_store.get('Ey', False) or G.snapshot_fields_to_store.get('Ez', False):
+                            required_fields.append('electric')
+                        if G.snapshot_fields_to_store.get('Hx', False) or G.snapshot_fields_to_store.get('Hy', False) or G.snapshot_fields_to_store.get('Hz', False):
+                            required_fields.append('magnetic')
+                    else:
+                        required_fields = ['electric', 'magnetic']
+
+                    def has_required_fields(snap):
+                        for field in required_fields:
+                            if not hasattr(snap, field):
+                                return False
+                        return True
+
+                    while not has_required_fields(snap_inner):
+                        if waited == 0:
+                            print(f"Waiting for snapshot memory for {snap_inner.filename}...")
+                        time.sleep(1)
+                        waited += 1
+                        if waited % 60 == 0:
+                            print(f"Still waiting for snapshot memory for {snap_inner.filename} ({waited//60} min elapsed)...")
+                        if waited >= max_wait:
+                            print(f"ERROR: Aborted writing {snap_inner.filename} after 15 min. Required field data ('{', '.join(required_fields)}') not available. This likely means the snapshot was not filled due to a timing or memory issue.")
+                            break
+                    if has_required_fields(snap_inner):
+                        pbar = tqdm(total=snap_inner.vtkdatawritesize, leave=True, unit='byte', unit_scale=True, desc='Writing snapshot file {} of {}, {}'.format((multiplier_iterations-1)*G.snapshot_interval+ i + 1, len(G.snapshots), os.path.split(snap_inner.filename)[1]), ncols=get_terminal_width() - 1, file=sys.stdout, disable=not G.progressbars)
+                        snap_inner.write_vtk_imagedata(pbar, G)
+                        pbar.close()
                     field_to_remove.append(snap_inner)
                 if G.messages: print()
                         

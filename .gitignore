@@ -20,3 +20,5 @@ dist/
 
 # Jupyter notebook checkpoints
 .ipynb_checkpoints/
+.history/
+tests/

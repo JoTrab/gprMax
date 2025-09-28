@@ -86,6 +86,8 @@ class Snapshot(object):
         self.time = time
         self.basefilename = filename
         self.outputdir = outputdir
+        self.electric = None
+        self.magnetic = None
         # Store which field components to save (default: all True)
         self.fields_to_store = fields_to_store or {
             'Ex': True, 'Ey': True, 'Ez': True,
