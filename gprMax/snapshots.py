@@ -194,9 +194,30 @@ class Snapshot(object):
         self.filehandle.write('<VTKFile type="ImageData" version="1.0" byte_order="{}">\n'.format(Snapshot.byteorder).encode('utf-8'))
         self.filehandle.write('<ImageData WholeExtent="{} {} {} {} {} {}" Origin="0 0 0" Spacing="{:.3} {:.3} {:.3}">\n'.format(self.xs, round_value(self.xf / self.dx), self.ys, round_value(self.yf / self.dy), self.zs, round_value(self.zf / self.dz), self.dx * G.dx, self.dy * G.dy, self.dz * G.dz).encode('utf-8'))
         self.filehandle.write('<Piece Extent="{} {} {} {} {} {}">\n'.format(self.xs, round_value(self.xf / self.dx), self.ys, round_value(self.yf / self.dy), self.zs, round_value(self.zf / self.dz)).encode('utf-8'))
-        self.filehandle.write('<CellData Vectors="E-field H-field">\n'.encode('utf-8'))
+        # Set VTK CellData attribute to Vectors only if all 2 or 3 components are present
+       
+        # Strict VTK standard: Vectors only for 2/3 components, Scalars only for 1, do not mix for same field
+        cell_data_attrs = []
+        # E-field
+        if n_electric == 1:
+            cell_data_attrs.append('Scalars="E-field"')
+        elif n_electric in [2,3]:
+            cell_data_attrs.append('Vectors="E-field"')
+        # H-field
+        if n_magnetic == 1:
+            cell_data_attrs.append('Scalars="H-field"')
+        elif n_magnetic in [2,3]:
+            cell_data_attrs.append('Vectors="H-field"')
+        # Compose CellData line
+        if cell_data_attrs:
+            cell_data_line = '<CellData ' + ' '.join(cell_data_attrs) + '>\n'
+        else:
+            cell_data_line = '<CellData>\n'
+        self.filehandle.write(cell_data_line.encode('utf-8'))
+
         self.filehandle.write('<DataArray type="{}" Name="E-field" NumberOfComponents="{}" format="appended" offset="0" />\n'.format(Snapshot.floatname, n_electric).encode('utf-8'))
-        self.filehandle.write('<DataArray type="{}" Name="H-field" NumberOfComponents="{}" format="appended" offset="{}" />\n'.format(Snapshot.floatname, n_magnetic, hfield_offset).encode('utf-8'))
+        if self.magnetic is not None:
+            self.filehandle.write('<DataArray type="{}" Name="H-field" NumberOfComponents="{}" format="appended" offset="{}" />\n'.format(Snapshot.floatname, n_magnetic, hfield_offset).encode('utf-8'))
         self.filehandle.write('</CellData>\n</Piece>\n</ImageData>\n<AppendedData encoding="raw">\n_'.encode('utf-8'))
 
         # Write number of bytes of appended data as UInt32
@@ -210,14 +231,11 @@ class Snapshot(object):
             np.zeros(electric_bytes // np.dtype(floattype).itemsize, dtype=floattype).tofile(self.filehandle)
             pbar.update(n=electric_bytes)
 
-        # Write number of bytes of appended data as UInt32
-        self.filehandle.write(pack('I', magnetic_bytes))
-        pbar.update(n=4)
+        # Only write H-field data if present
         if self.magnetic is not None:
+            self.filehandle.write(pack('I', magnetic_bytes))
+            pbar.update(n=4)
             self.magnetic.tofile(self.filehandle)
-            pbar.update(n=magnetic_bytes)
-        else:
-            np.zeros(magnetic_bytes // np.dtype(floattype).itemsize, dtype=floattype).tofile(self.filehandle)
             pbar.update(n=magnetic_bytes)
 
         self.filehandle.write('\n</AppendedData>\n</VTKFile>'.encode('utf-8'))

@@ -303,7 +303,8 @@ def run_model(args, currentmodelrun, modelend, numbermodelruns, inputfile, usern
             snapsmemsizeOne = (2 * snapOne.datasizefield)
             SnapBatchSize = snapsmemsizeOne*G.snapshot_interval
             AllSnapSize = snapsmemsizeOne*len(G.snapshots)  
-            G.memory_check(snapsmemsize=int(SnapBatchSize))
+            nr_fieldsToStore = len([f for f in ['Ex', 'Ey', 'Ez','Hx','Hy', 'Hz'] if G.snapshot_fields_to_store.get(f, True)])
+            G.memory_check(snapsmemsize=int((1/6)*nr_fieldsToStore*SnapBatchSize))
         else:    
             snapsmemsize = 0
             for snap in G.snapshots:
