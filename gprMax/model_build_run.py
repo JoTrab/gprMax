@@ -108,10 +108,11 @@ def run_model(args, currentmodelrun, modelend, numbermodelruns, inputfile, usern
     appendmodelnumber = '' if numbermodelruns == 1 and not args.task and not args.restart else str(currentmodelrun)
 
     # Set snapshot interval and outputdir from command line args (default None)
-    snapshot_interval = getattr(args, 'snapshot_interval', None)
-    snapshot_outputdir = getattr(args, 'snapshot_outputdir', None)
-    snapshot_exclude_fields = getattr(args, 'snapshot_exclude_fields', None)
-
+    snapshot_interval = getattr(args, 'snapshotInterval', None)
+    snapshot_outputdir = getattr(args, 'snapshotOutputdir', None)
+    snapshot_exclude_fields = getattr(args, 'snapshotExcludeFields', None)
+    
+    print('start of loooop' ,snapshot_interval)
     # Normal model reading/building process; bypassed if geometry information to be reused
     if 'G' not in globals():
 
@@ -125,6 +126,12 @@ def run_model(args, currentmodelrun, modelend, numbermodelruns, inputfile, usern
         # Single GPU object
         if args.gpu:
             G.gpu = args.gpu
+            
+            
+        #attribute for RTM
+        G.snapshot_interval = snapshot_interval
+        G.snapshot_outputdir = snapshot_outputdir
+        G.snapshot_exclude_fields = snapshot_exclude_fields    
 
         G.inputfilename = os.path.split(inputfile.name)[1]
         G.inputdirectory = os.path.dirname(os.path.abspath(inputfile.name))
@@ -165,38 +172,25 @@ def run_model(args, currentmodelrun, modelend, numbermodelruns, inputfile, usern
         G.materials.append(m)
 
         # Process parameters for commands that can only occur once in the model
+        print('before',G.snapshot_interval)
+
         process_singlecmds(singlecmds, G)
-
-        # Allow snapshot interval/outputdir/exclude_fields to be set from input file (single-use commands)
-        # Look for #snapshot_interval, #snapshot_outputdir, #snapshot_exclude_fields in singlecmds
-        if '#snapshot_interval' in singlecmds and singlecmds['#snapshot_interval']:
-            try:
-                G.snapshot_interval = int(singlecmds['#snapshot_interval'][0].split()[0])
-            except Exception:
-                pass
-        elif snapshot_interval is not None:
-            G.snapshot_interval = snapshot_interval
+        print('after',G.snapshot_interval)
+        
+        if G.snapshot_outputdir is not None:
+            # If running multiple models, append currentmodelrun to snapshot_outputdir
+            if numbermodelruns > 1:
+                G.snapshot_outputdir = os.path.join(os.path.abspath(G.snapshot_outputdir), str(currentmodelrun))
+                print(G.snapshot_outputdir)  
+        if G.snapshot_exclude_fields is not None:
+            exclude_fields = G.snapshot_exclude_fields
         else:
-            G.snapshot_interval = None
-
-        if '#snapshot_outputdir' in singlecmds and singlecmds['#snapshot_outputdir']:
-            G.snapshot_outputdir = singlecmds['#snapshot_outputdir'][0].strip()
-        elif snapshot_outputdir is not None:
-            G.snapshot_outputdir = snapshot_outputdir
-        else:
-            G.snapshot_outputdir = None
-
-        if '#snapshot_exclude_fields' in singlecmds and singlecmds['#snapshot_exclude_fields']:
-            exclude_fields = singlecmds['#snapshot_exclude_fields'][0].split()
-        elif snapshot_exclude_fields is not None:
-            exclude_fields = snapshot_exclude_fields
-        else:
-            exclude_fields = []
-
+            exclude_fields = []   
+              
         # Build fields_to_store dict for snapshots
         all_fields = ['Ex', 'Ey', 'Ez', 'Hx', 'Hy', 'Hz']
         G.snapshot_fields_to_store = {f: f not in exclude_fields for f in all_fields}
-
+    print('inbetween',G.snapshot_interval)
     # Process parameters for commands that can occur multiple times in the model
     if G.messages: print()
     # Pass fields_to_store to multicmds if needed
@@ -301,9 +295,11 @@ def run_model(args, currentmodelrun, modelend, numbermodelruns, inputfile, usern
         if G.snapshot_interval is not None and G.snapshot_interval > 0 and G.snapshots:
             snapOne = G.snapshots[0]
             snapsmemsizeOne = (2 * snapOne.datasizefield)
-            SnapBatchSize = snapsmemsizeOne*G.snapshot_interval
-            AllSnapSize = snapsmemsizeOne*len(G.snapshots)  
             nr_fieldsToStore = len([f for f in ['Ex', 'Ey', 'Ez','Hx','Hy', 'Hz'] if G.snapshot_fields_to_store.get(f, True)])
+            SnapBatchSize = (1/6)*nr_fieldsToStore*snapsmemsizeOne*G.snapshot_interval
+            AllSnapSize = (1/6)*nr_fieldsToStore*snapsmemsizeOne*len(G.snapshots)              
+            print('storing '+ str(nr_fieldsToStore) + 'fields')
+            G.memoryusage += SnapBatchSize                       
             G.memory_check(snapsmemsize=int((1/6)*nr_fieldsToStore*SnapBatchSize))
         else:    
             snapsmemsize = 0
@@ -314,8 +310,9 @@ def run_model(args, currentmodelrun, modelend, numbermodelruns, inputfile, usern
             G.memory_check(snapsmemsize=int(snapsmemsize))
         if G.messages:
             if G.snapshot_interval is not None and G.snapshot_interval > 0 and G.snapshots:     
-                print('\nMemory (RAM) required - updated (snapshots, per batch): ~{}\n'.format(human_size(SnapBatchSize)))     
-                print('\Disk space required - updated (snapshots, all batches): ~{}\n'.format(human_size(AllSnapSize)))                            
+                print('\nMemory (RAM) required for snapshots - updated (per batch): ~{}\n'.format(human_size(SnapBatchSize)))   
+                print('\nMemory (RAM) required for all - updated (per batch): ~{}\n'.format( human_size(G.memoryusage)))  
+                print('\Disk space required  for snapshots - (all batches): ~{}\n'.format(human_size(AllSnapSize)))                            
             else:
                 print('\nMemory (RAM) required - updated (snapshots): ~{}\n'.format(human_size(G.memoryusage)))
                 

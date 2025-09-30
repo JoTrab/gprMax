@@ -64,9 +64,9 @@ def main():
     parser.add_argument('--geometry-fixed', action='store_true', default=False, help='flag to not reprocess model geometry, e.g. for B-scans where the geometry is fixed')
     parser.add_argument('--write-processed', action='store_true', default=False, help='flag to write an input file after any Python code and include commands in the original input file have been processed')
     parser.add_argument('--opt-taguchi', action='store_true', default=False, help='flag to optimise parameters using the Taguchi optimisation method')
-    parser.add_argument('--snapshot-interval', type=int, default=None, help='Interval (in timesteps) to save snapshots incrementally to disk (set to 0 or omit for legacy behavior)')
-    parser.add_argument('--snapshot-outputdir', type=str, default=None, help='Directory to save incremental snapshots (optional, default: inputfile_snaps)')
-    parser.add_argument('--snapshot-exclude-fields', nargs='*', default=None, help='List of field components to exclude from snapshots (e.g. Hx Hy Hz)')
+    parser.add_argument('-snapshotInterval', type=int, default=None, help='Interval (in timesteps) to save snapshots incrementally to disk (set to 0 or omit for legacy behavior)')
+    parser.add_argument('-snapshotOutputdir', type=str, default=None, help='Directory to save incremental snapshots (optional, default: inputfile_snaps)')
+    parser.add_argument('-snapshotExcludeFields', nargs='*', default=None, help='List of field components to exclude from snapshots (e.g. Hx Hy Hz)')
     args = parser.parse_args()
 
     run_main(args)
@@ -382,7 +382,7 @@ def run_mpi_sim(args, inputfile, usernamespace, optparams=None):
         # Ignore mpicomm object if it exists as only strings can be passed via spawn
         myargv = []
         for key, value in vars(args).items():
-            if value:
+            if value is not None and value is not False:
                 # Input file name always comes first
                 if 'inputfile' in key:
                     myargv.append(value)
@@ -394,13 +394,23 @@ def run_mpi_sim(args, inputfile, usernamespace, optparams=None):
                 elif 'mpicomm' in key:
                     pass
                 elif '_' in key:
-                    key = key.replace('_', '-')
-                    myargv.append('--' + key)
+                    key_dash = key.replace('_', '-')
+                    myargv.append('--' + key_dash)
+                    # If value is a list, append each item separately
+                    if isinstance(value, list):
+                        for item in value:
+                            myargv.append(str(item))
+                    # If value is not True and not a list, append its string value
+                    elif value is not True:
+                        myargv.append(str(value))
                 else:
                     myargv.append('-' + key)
-                    if value is not True:
+                    if isinstance(value, list):
+                        for item in value:
+                            myargv.append(str(item))
+                    elif value is not True:
                         myargv.append(str(value))
-
+            # print('myargv:', myargv)
         # Create a list of work
         worklist = []
         for model in range(modelstart, modelend):
