@@ -108,11 +108,22 @@ def run_model(args, currentmodelrun, modelend, numbermodelruns, inputfile, usern
     appendmodelnumber = '' if numbermodelruns == 1 and not args.task and not args.restart else str(currentmodelrun)
 
     # Set snapshot interval and outputdir from command line args (default None)
-    snapshot_interval = getattr(args, 'snapshotInterval', None)
-    snapshot_outputdir = getattr(args, 'snapshotOutputdir', None)
+    snapshotInterval = getattr(args, 'snapshotInterval', None)
+    snapshotOutputdir = getattr(args, 'snapshotOutputdir', None)
     snapshot_exclude_fields = getattr(args, 'snapshotExcludeFields', None)
+    waitForBackwardFolder = getattr(args, 'waitForBackwardFolder', None)
+    ImagingCondition = getattr(args, 'ImagingCondition', False)
+    # Convert ImagingCondition string to boolean if needed
+    if isinstance(ImagingCondition, str):
+        ImagingCondition = ImagingCondition.lower() in ('True','true', '1', 'yes', 'on')
+    # Use waitForBackwardFolder and ImagingCondition in simulation logic as needed
+    if waitForBackwardFolder:
+        print('forward folder is waited upon in imaging condition...')
+        # Insert logic to wait for backward simulation here
+    if ImagingCondition:
+        print(f'Using imaging condition: {ImagingCondition}')
+        # Insert logic to use specified imaging condition here
     
-    print('start of loooop' ,snapshot_interval)
     # Normal model reading/building process; bypassed if geometry information to be reused
     if 'G' not in globals():
 
@@ -129,11 +140,14 @@ def run_model(args, currentmodelrun, modelend, numbermodelruns, inputfile, usern
             
             
         #attribute for RTM
-        G.snapshot_interval = snapshot_interval
-        G.snapshot_outputdir = snapshot_outputdir
+        G.snapshotInterval = snapshotInterval
+        G.snapshotOutputdir = snapshotOutputdir
         G.snapshot_exclude_fields = snapshot_exclude_fields    
-
+        G.ImagingCondition = ImagingCondition
+        G.waitForBackwardFolder = waitForBackwardFolder
         G.inputfilename = os.path.split(inputfile.name)[1]
+        print('inside main  loop', G.snapshotOutputdir,G.ImagingCondition)
+
         G.inputdirectory = os.path.dirname(os.path.abspath(inputfile.name))
         inputfilestr = '\n--- Model {}/{}, input file: {}'.format(currentmodelrun, modelend, inputfile.name)
         if G.messages:
@@ -172,16 +186,17 @@ def run_model(args, currentmodelrun, modelend, numbermodelruns, inputfile, usern
         G.materials.append(m)
 
         # Process parameters for commands that can only occur once in the model
-        print('before',G.snapshot_interval)
 
         process_singlecmds(singlecmds, G)
-        print('after',G.snapshot_interval)
+        print('after singlecmds', G.snapshotOutputdir,G.ImagingCondition)
+
         
-        if G.snapshot_outputdir is not None:
-            # If running multiple models, append currentmodelrun to snapshot_outputdir
+        if G.snapshotOutputdir is not None:
+            # If running multiple models, append currentmodelrun to snapshotOutputdir
+            print(numbermodelruns)
             if numbermodelruns > 1:
-                G.snapshot_outputdir = os.path.join(os.path.abspath(G.snapshot_outputdir), str(currentmodelrun))
-                print(G.snapshot_outputdir)  
+                G.snapshotOutputdir = os.path.join(os.path.abspath(G.snapshotOutputdir), str(currentmodelrun))
+                print(G.snapshotOutputdir)  
         if G.snapshot_exclude_fields is not None:
             exclude_fields = G.snapshot_exclude_fields
         else:
@@ -190,7 +205,6 @@ def run_model(args, currentmodelrun, modelend, numbermodelruns, inputfile, usern
         # Build fields_to_store dict for snapshots
         all_fields = ['Ex', 'Ey', 'Ez', 'Hx', 'Hy', 'Hz']
         G.snapshot_fields_to_store = {f: f not in exclude_fields for f in all_fields}
-    print('inbetween',G.snapshot_interval)
     # Process parameters for commands that can occur multiple times in the model
     if G.messages: print()
     # Pass fields_to_store to multicmds if needed
@@ -292,11 +306,11 @@ def run_model(args, currentmodelrun, modelend, numbermodelruns, inputfile, usern
 
     # Check there is sufficient memory to store any snapshots
     if G.snapshots:
-        if G.snapshot_interval is not None and G.snapshot_interval > 0 and G.snapshots:
+        if G.snapshotInterval is not None and G.snapshotInterval > 0 and G.snapshots:
             snapOne = G.snapshots[0]
             snapsmemsizeOne = (2 * snapOne.datasizefield)
             nr_fieldsToStore = len([f for f in ['Ex', 'Ey', 'Ez','Hx','Hy', 'Hz'] if G.snapshot_fields_to_store.get(f, True)])
-            SnapBatchSize = (1/6)*nr_fieldsToStore*snapsmemsizeOne*G.snapshot_interval
+            SnapBatchSize = (1/6)*nr_fieldsToStore*snapsmemsizeOne*G.snapshotInterval
             AllSnapSize = (1/6)*nr_fieldsToStore*snapsmemsizeOne*len(G.snapshots)              
             print('storing '+ str(nr_fieldsToStore) + 'fields')
             G.memoryusage += SnapBatchSize                       
@@ -309,7 +323,7 @@ def run_model(args, currentmodelrun, modelend, numbermodelruns, inputfile, usern
             G.memoryusage += int(snapsmemsize)              
             G.memory_check(snapsmemsize=int(snapsmemsize))
         if G.messages:
-            if G.snapshot_interval is not None and G.snapshot_interval > 0 and G.snapshots:     
+            if G.snapshotInterval is not None and G.snapshotInterval > 0 and G.snapshots:     
                 print('\nMemory (RAM) required for snapshots - updated (per batch): ~{}\n'.format(human_size(SnapBatchSize)))   
                 print('\nMemory (RAM) required for all - updated (per batch): ~{}\n'.format( human_size(G.memoryusage)))  
                 print('\Disk space required  for snapshots - (all batches): ~{}\n'.format(human_size(AllSnapSize)))                            
@@ -423,8 +437,8 @@ def run_model(args, currentmodelrun, modelend, numbermodelruns, inputfile, usern
         write_hdf5_outputfile(outputfile, G)
 
         # Write any snapshots to file (only if not using incremental/batch snapshot saving)
-        snapshot_interval = getattr(G, 'snapshot_interval', None)
-        incremental_snapshots = snapshot_interval is not None and snapshot_interval > 0
+        snapshotInterval = getattr(G, 'snapshotInterval', None)
+        incremental_snapshots = snapshotInterval is not None and snapshotInterval > 0
         if G.snapshots and not incremental_snapshots:
             # Create directory and construct filename from user-supplied name and model run number
             snapshotdir = os.path.join(G.inputdirectory, os.path.splitext(G.inputfilename)[0] + '_snaps' + appendmodelnumber)
@@ -471,10 +485,11 @@ def solve_cpu(currentmodelrun, modelend, G,appendmodelnumber=None):
     tsolvestart = timer()
 
     # Determine if incremental snapshot saving is enabled
-    snapshot_interval = getattr(G, 'snapshot_interval', None)
-    snapshot_outputdir = getattr(G, 'snapshot_outputdir', None)
-    incremental_snapshots = snapshot_interval is not None and snapshot_interval > 0
-    if G.snapshot_interval is not None and G.snapshot_interval > 0:
+    snapshotInterval = getattr(G, 'snapshotInterval', None)
+    snapshotOutputdir = getattr(G, 'snapshotOutputdir', None)
+    print('inloop :         ',snapshotOutputdir)
+    incremental_snapshots = snapshotInterval is not None and snapshotInterval > 0
+    if G.snapshotInterval is not None and G.snapshotInterval > 0:
         # Create directory and construct filename from user-supplied name and model run number
         snapshotdir = os.path.join(G.inputdirectory, os.path.splitext(G.inputfilename)[0] + '_snaps' + appendmodelnumber)
         if not os.path.exists(snapshotdir):
@@ -498,17 +513,17 @@ def solve_cpu(currentmodelrun, modelend, G,appendmodelnumber=None):
                     snap.fields_to_store = G.snapshot_fields_to_store
                 snap.store(G)
                 snapStore_iterator += 1
-                multiplier_iterations = (snapStore_iterator )  // G.snapshot_interval   
+                multiplier_iterations = (snapStore_iterator )  // G.snapshotInterval   
 
         # At defined snapshot intervals, write VTKs and clear memory
-        if G.snapshot_interval is not None and G.snapshot_interval > 0:
-            #print((iteration + 1) % G.snapshot_interval)
-            if multiplier_iterations > 0 and (snapStore_iterator) % multiplier_iterations*G.snapshot_interval == 0 and multiplier_iterations > old_multiplier: 
+        if G.snapshotInterval is not None and G.snapshotInterval > 0:
+            #print((iteration + 1) % G.snapshotInterval)
+            if multiplier_iterations > 0 and (snapStore_iterator) % multiplier_iterations*G.snapshotInterval == 0 and multiplier_iterations > old_multiplier: 
                 old_multiplier = multiplier_iterations
                 field_to_remove = []
                 if G.messages: print()
-                for i, snap_inner in enumerate(G.snapshots[(multiplier_iterations-1)*G.snapshot_interval:multiplier_iterations*G.snapshot_interval]):
-                    print(old_multiplier,multiplier_iterations,len(G.snapshots),snap_inner.time  ,snapStore_iterator,multiplier_iterations)             
+                for i, snap_inner in enumerate(G.snapshots[(multiplier_iterations-1)*G.snapshotInterval:multiplier_iterations*G.snapshotInterval]):
+                    # print(old_multiplier,multiplier_iterations,len(G.snapshots),snap_inner.time  ,snapStore_iterator,multiplier_iterations)             
                     import time
                     max_wait = 15 * 60  # 15 minutes in seconds
                     waited = 0
@@ -523,6 +538,7 @@ def solve_cpu(currentmodelrun, modelend, G,appendmodelnumber=None):
 
                     def has_required_fields(snap):
                         for field in required_fields:
+                            #print(field)
                             if not hasattr(snap, field):
                                 return False
                         return True
@@ -537,10 +553,19 @@ def solve_cpu(currentmodelrun, modelend, G,appendmodelnumber=None):
                         if waited >= max_wait:
                             print(f"ERROR: Aborted writing {snap_inner.filename} after 15 min. Required field data ('{', '.join(required_fields)}') not available. This likely means the snapshot was not filled due to a timing or memory issue.")
                             break
+
                     if has_required_fields(snap_inner):
-                        pbar = tqdm(total=snap_inner.vtkdatawritesize, leave=True, unit='byte', unit_scale=True, desc='Writing snapshot file {} of {}, {}'.format((multiplier_iterations-1)*G.snapshot_interval+ i + 1, len(G.snapshots), os.path.split(snap_inner.filename)[1]), ncols=get_terminal_width() - 1, file=sys.stdout, disable=not G.progressbars)
-                        snap_inner.write_vtk_imagedata(pbar, G)
-                        pbar.close()
+                        if not G.ImagingCondition:
+                            print('sdfsdfsdfsdf´',G.ImagingCondition)
+                            print(snap_inner.filename)
+                            pbar = tqdm(total=snap_inner.vtkdatawritesize, leave=True, unit='byte', unit_scale=True, desc='Writing snapshot file {} of {}, {}'.format((multiplier_iterations-1)*G.snapshotInterval+ i + 1, len(G.snapshots), os.path.split(snap_inner.filename)[1]), ncols=get_terminal_width() - 1, file=sys.stdout, disable=not G.progressbars)
+                            snap_inner.write_vtk_imagedata(pbar, G)
+                            pbar.close()
+                        else:   
+                            print('blablablablabla else ',G.ImagingCondition)
+                            snap_inner.execute_imaging_condition(G)
+                            np.save('G_CrossCorr.npy', G.CrossCorr)   
+                            print('inside imaging condition')  
                     field_to_remove.append(snap_inner)
                 if G.messages: print()
                         

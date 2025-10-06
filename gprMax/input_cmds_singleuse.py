@@ -40,6 +40,19 @@ from gprMax.waveforms import Waveform
 
 
 def process_singlecmds(singlecmds, G):
+    if '#waitForBackwardFolder' in singlecmds and singlecmds['#waitForBackwardFolder']:
+        val = singlecmds['#waitForBackwardFolder'][0].strip().lower()
+        G.waitForBackwardFolder = (val == 'y' or val == 'true' or val == '1' or val == '')
+    if '#ImagingCondition' in singlecmds and singlecmds['#ImagingCondition']:
+        val = singlecmds['#ImagingCondition'][0].strip()
+        if isinstance(val, str):
+            
+            G.ImagingCondition = val.lower() in ('True','true', '1', 'yes', 'on')
+            print('inside dinglecmds', val,G.ImagingCondition)
+        else:
+            G.ImagingCondition = bool(val)
+        G.CrossCorr = None
+
     """Checks the validity of command parameters and creates instances of classes of parameters.
 
     Args:
@@ -48,48 +61,48 @@ def process_singlecmds(singlecmds, G):
     """
 
 
-    # # Allow snapshot interval/outputdir/exclude_fields to be set from input file (single-use commands)
-    # # Look for #snapshot_interval, #snapshot_outputdir, #snapshot_exclude_fields in singlecmds
-    # if '#snapshot_interval' in singlecmds and singlecmds['#snapshot_interval']:
-    #     try:
-    #         G.snapshot_interval = int(singlecmds['#snapshot_interval'][0].split()[0])
-    #     except Exception:
-    #         pass
-    # elif snapshot_interval is not None:
-    #     G.snapshot_interval = snapshot_interval
-    # else:
-    #     G.snapshot_interval = None
+    # Allow snapshot interval/outputdir/exclude_fields to be set from input file (single-use commands)
+    # Look for #snapshotInterval, #snapshotOutputdir, #snapshot_exclude_fields in singlecmds
+    if '#snapshotInterval' in singlecmds and singlecmds['#snapshotInterval']:
+        try:
+            G.snapshotInterval = int(singlecmds['#snapshotInterval'][0].split()[0])
+        except Exception:
+            pass
+    elif G.snapshotInterval is not None:
+        G.snapshotInterval = G.snapshotInterval
+    else:
+        G.snapshotInterval = None
 
-    # if '#snapshot_outputdir' in singlecmds and singlecmds['#snapshot_outputdir']:
-    #     G.snapshot_outputdir = singlecmds['#snapshot_outputdir'][0].strip()
-    # elif snapshot_outputdir is not None:
-    #     G.snapshot_outputdir = snapshot_outputdir
-    # else:
-    #     G.snapshot_outputdir = None
+    if '#snapshotOutputdir' in singlecmds and singlecmds['#snapshotOutputdir']:
+        G.snapshotOutputdir = singlecmds['#snapshotOutputdir'][0].strip()
+    elif  G.snapshotOutputdir is not None:
+        G.snapshotOutputdir =  G.snapshotOutputdir
+    else:
+        G.snapshotOutputdir = None
     
 
     
-    # if '#snapshot_exclude_fields' in singlecmds and singlecmds['#snapshot_exclude_fields']:
-    #     exclude_fields = singlecmds['#snapshot_exclude_fields'][0].split()
-    # elif snapshot_exclude_fields is not None:
-    #     exclude_fields = snapshot_exclude_fields
-    # else:
-    #     exclude_fields = []
+    if '#snapshot_exclude_fields' in singlecmds and singlecmds['#snapshot_exclude_fields']:
+        G.snapshot_exclude_fields = singlecmds['#snapshot_exclude_fields'][0].split()
+    elif G.snapshot_exclude_fields is not None:
+        G.snapshot_exclude_fields = G.snapshot_exclude_fields
+    else:
+        G.snapshot_exclude_fields = []
 
 
 
  
-    # Parse #snapshot_interval and #snapshot_outputdir as single-use commands
-    if '#snapshot_interval' in singlecmds and singlecmds['#snapshot_interval']:
-        try:
-            G.snapshot_interval = int(singlecmds['#snapshot_interval'][0].split()[0])
-        except Exception:
-            raise CmdInputError("#snapshot_interval must be an integer.")
+    # # Parse #snapshotInterval and #snapshotOutputdir as single-use commands
+    # if '#snapshotInterval' in singlecmds and singlecmds['#snapshotInterval']:
+    #     try:
+    #         G.snapshotInterval = int(singlecmds['#snapshotInterval'][0].split()[0])
+    #     except Exception:
+    #         raise CmdInputError("#snapshotInterval must be an integer.")
         
-    if '#snapshot_outputdir' in singlecmds and singlecmds['#snapshot_outputdir']:
-        G.snapshot_outputdir = singlecmds['#snapshot_outputdir'][0].strip()
-    if '#snapshot_exclude_fields' in singlecmds and singlecmds['#snapshot_exclude_fields']:
-        G.exclude_fields = singlecmds['#snapshot_exclude_fields'][0].split()
+    # if '#snapshotOutputdir' in singlecmds and singlecmds['#snapshotOutputdir']:
+    #     G.snapshotOutputdir = singlecmds['#snapshotOutputdir'][0].strip()
+    # if '#snapshot_exclude_fields' in singlecmds and singlecmds['#snapshot_exclude_fields']:
+    #     G.exclude_fields = singlecmds['#snapshot_exclude_fields'][0].split()
 
     # Check validity of command parameters in order needed
     # messages

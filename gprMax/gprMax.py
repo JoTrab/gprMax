@@ -66,6 +66,8 @@ def main():
     parser.add_argument('--opt-taguchi', action='store_true', default=False, help='flag to optimise parameters using the Taguchi optimisation method')
     parser.add_argument('-snapshotInterval', type=int, default=None, help='Interval (in timesteps) to save snapshots incrementally to disk (set to 0 or omit for legacy behavior)')
     parser.add_argument('-snapshotOutputdir', type=str, default=None, help='Directory to save incremental snapshots (optional, default: inputfile_snaps)')
+    parser.add_argument('-waitForBackwardFolder', type=str, default=None, help='Wait for backward simulation to finish before proceeding')
+    parser.add_argument('-ImagingCondition', type=bool, default=False, help='Specify if computing imaging condition on the fly ')
     parser.add_argument('-snapshotExcludeFields', nargs='*', default=None, help='List of field components to exclude from snapshots (e.g. Hx Hy Hz)')
     args = parser.parse_args()
 
@@ -86,16 +88,20 @@ def api(
     geometry_fixed=False,
     write_processed=False,
     opt_taguchi=False,
-    snapshot_interval=None,
-    snapshot_outputdir=None
+    snapshotInterval=None,
+    snapshotOutputdir=None,
+    waitForBackwardFolder=None,
+    ImagingCondition=False
 ):
     """If installed as a module this is the entry point."""
 
     class ImportArguments:
         pass
     # ...existing code...
-    ImportArguments.snapshot_interval = snapshot_interval
-    ImportArguments.snapshot_outputdir = snapshot_outputdir
+    ImportArguments.snapshotInterval = snapshotInterval
+    ImportArguments.snapshotOutputdir = snapshotOutputdir
+    ImportArguments.waitForBackwardFolder = waitForBackwardFolder
+    ImportArguments.ImagingCondition = ImagingCondition
 
     args = ImportArguments()
 
@@ -112,6 +118,8 @@ def api(
     args.geometry_fixed = geometry_fixed
     args.write_processed = write_processed
     args.opt_taguchi = opt_taguchi
+    args.waitForBackwardFolder = waitForBackwardFolder
+    args.ImagingCondition = ImagingCondition
 
     run_main(args)
 

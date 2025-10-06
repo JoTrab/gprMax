@@ -539,7 +539,7 @@ def process_multicmds(multicmds, G):
                 raise CmdInputError("'" + cmdname + ': ' + ' '.join(tmp) + "'" + ' time value is not valid')
 
             # Pass outputdir from G if available
-            outputdir = getattr(G, 'snapshot_outputdir', None)
+            outputdir = getattr(G, 'snapshotOutputdir', None)
             s = Snapshot(xs, ys, zs, xf, yf, zf, dx, dy, dz, time, tmp[10], outputdir=outputdir)
 
             if G.messages:

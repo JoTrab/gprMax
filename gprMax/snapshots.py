@@ -25,12 +25,14 @@ import numpy as np
 from gprMax.constants import floattype
 from gprMax.snapshots_ext import calculate_snapshot_fields
 from gprMax.utilities import round_value
-
+import time
+import pyvista as pv  # For reading VTK files
 
 class Snapshot(object):
     """Snapshots of the electric and magnetic field values."""
 
     # Dimensions of largest requested snapshot
+    
     nx_max = 0
     ny_max = 0
     nz_max = 0
@@ -94,7 +96,7 @@ class Snapshot(object):
             'Hx': True, 'Hy': True, 'Hz': True
         }
                 # Determine output filename
-        print(self.outputdir)        
+        
         if self.outputdir is not None:
             if not os.path.exists(self.outputdir):
                 os.makedirs(self.outputdir)
@@ -118,7 +120,8 @@ class Snapshot(object):
             G (class): Grid class instance - holds essential parameters describing the model.
         """
 
-         # Memory views of field arrays to dimensions required for the snapshot
+         # Memory views of field arrays to dimensions required for the 
+
         Exslice = np.ascontiguousarray(G.Ex[self.sx, self.sy, self.sz])
         Eyslice = np.ascontiguousarray(G.Ey[self.sx, self.sy, self.sz])
         Ezslice = np.ascontiguousarray(G.Ez[self.sx, self.sy, self.sz])
@@ -176,6 +179,8 @@ class Snapshot(object):
     def write_vtk_imagedata(self, pbar, G):
         """Write snapshot data to a VTK ImageData (.vti) file, robust to excluded fields."""
         # Determine number of components for E and H fields
+        print(self.outputdir,self.basefilename,self.filename)    
+
         n_electric = 0
         n_magnetic = 0
         if self.electric is not None:
@@ -189,13 +194,13 @@ class Snapshot(object):
         magnetic_bytes = n_magnetic * np.dtype(floattype).itemsize * self.ncells
         hfield_offset = electric_bytes + np.dtype(np.uint32).itemsize
 
+        
         self.filehandle = open(self.filename, 'wb')
         self.filehandle.write('<?xml version="1.0"?>\n'.encode('utf-8'))
         self.filehandle.write('<VTKFile type="ImageData" version="1.0" byte_order="{}">\n'.format(Snapshot.byteorder).encode('utf-8'))
         self.filehandle.write('<ImageData WholeExtent="{} {} {} {} {} {}" Origin="0 0 0" Spacing="{:.3} {:.3} {:.3}">\n'.format(self.xs, round_value(self.xf / self.dx), self.ys, round_value(self.yf / self.dy), self.zs, round_value(self.zf / self.dz), self.dx * G.dx, self.dy * G.dy, self.dz * G.dz).encode('utf-8'))
         self.filehandle.write('<Piece Extent="{} {} {} {} {} {}">\n'.format(self.xs, round_value(self.xf / self.dx), self.ys, round_value(self.yf / self.dy), self.zs, round_value(self.zf / self.dz)).encode('utf-8'))
         # Set VTK CellData attribute to Vectors only if all 2 or 3 components are present
-       
         # Strict VTK standard: Vectors only for 2/3 components, Scalars only for 1, do not mix for same field
         cell_data_attrs = []
         # E-field
@@ -216,6 +221,7 @@ class Snapshot(object):
         self.filehandle.write(cell_data_line.encode('utf-8'))
 
         self.filehandle.write('<DataArray type="{}" Name="E-field" NumberOfComponents="{}" format="appended" offset="0" />\n'.format(Snapshot.floatname, n_electric).encode('utf-8'))
+    
         if self.magnetic is not None:
             self.filehandle.write('<DataArray type="{}" Name="H-field" NumberOfComponents="{}" format="appended" offset="{}" />\n'.format(Snapshot.floatname, n_magnetic, hfield_offset).encode('utf-8'))
         self.filehandle.write('</CellData>\n</Piece>\n</ImageData>\n<AppendedData encoding="raw">\n_'.encode('utf-8'))
@@ -240,6 +246,36 @@ class Snapshot(object):
 
         self.filehandle.write('\n</AppendedData>\n</VTKFile>'.encode('utf-8'))
         self.filehandle.close()
+        
+    def execute_imaging_condition(self, G):    
+        # Dummy forward output directory
+        
+        # ForwardOutputDir = "/path/to/forward/output"  # Replace with actual path as needed
+
+        # # Get just the filename (without path) from self.filename
+        forward_filename = os.path.basename(self.filename)
+        forward_filepath = os.path.join(G.waitForBackwardFolder, forward_filename)
+
+        # # Wait until the forward data file exists, checking every second, print every 30 seconds
+        wait_counter = 0
+        while not os.path.exists(forward_filepath):
+            if wait_counter % 30 == 0:
+                print(f"Waiting for forward data file: {forward_filepath}")
+            time.sleep(1)
+            wait_counter += 1
+        fwd_grid = pv.read(forward_filepath)
+        # Select the array to use (e.g., E-field)
+        fwd_data = fwd_grid[fwd_grid.array_names[0]]
+        # Cross-correlation imaging condition (element-wise product)
+
+        product = self.electric.ravel(order='F') * fwd_data.ravel(order='F')
+
+        if G.CrossCorr is None:
+            G.CrossCorr = product.copy()
+        else:
+            G.CrossCorr += product    
+
+
 
     def clear(self, G=None):
         """Clear stored electric and magnetic field arrays to free memory."""
@@ -249,6 +285,9 @@ class Snapshot(object):
             del self.magnetic
         # Optionally clear other large arrays if needed
         # ...existing code...
+    
+
+
 
 
 def gpu_initialise_snapshot_array(G):
